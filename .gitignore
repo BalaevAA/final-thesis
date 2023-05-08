@@ -1,0 +1,7 @@
+__pycache__/
+venv/
+*.zip
+*.csv
+.JPEG
+.PNG
+tiny-imagenet-200/
