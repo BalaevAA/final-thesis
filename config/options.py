@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# Python version: 3.6
-
 import argparse
 
 
@@ -26,21 +22,9 @@ def args_parser():
 
     # model arguments
     parser.add_argument('--model', type=str, default='mobilenet', help='model name')
-    parser.add_argument('--kernel_num', type=int, default=9,
-                        help='number of each kind of kernel')
-    parser.add_argument('--kernel_sizes', type=str, default='3,4,5',
-                        help='comma-separated kernel size to \
-                        use for convolution')
-    parser.add_argument('--num_channels', type=int, default=1, help="number \
+    parser.add_argument('--num_channels', type=int, default=3, help="number \
                         of channels of imgs")
-    parser.add_argument('--norm', type=str, default='batch_norm',
-                        help="batch_norm, layer_norm, or None")
-    parser.add_argument('--num_filters', type=int, default=32,
-                        help="number of filters for conv nets -- 32 for \
-                        mini-imagenet, 64 for omiglot.")
-    parser.add_argument('--max_pool', type=str, default='True',
-                        help="Whether use max pooling rather than \
-                        strided convolutions")
+
 
     # other arguments
     parser.add_argument('--dataset', type=str, default='imagenet', help="name \

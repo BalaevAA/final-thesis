@@ -1,144 +1,190 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# Python version: 3.6
-
-
 import os
+import os.path
+import wget
+from zipfile import ZipFile
 import copy
-import time
-import pickle
 import numpy as np
-from tqdm import tqdm
-
+from torchvision import datasets, transforms
 import torch
-from tensorboardX import SummaryWriter
-
+import pickle
+from data_utils.sampling import imagenet_iid, imagenet_noniid
 from config.options import args_parser
-from model.update import LocalUpdate, test_inference
+from model.update import LocalUpdate
 from model.models import MobileNetV2
-from utils import get_dataset, average_weights, exp_details
+from utils.util import FedAvg
+from model.test import test_img
+from utils.util import setup_seed, exp_details
+from data_utils.data_reader import TinyImageNetDataset
+import torchvision.models as models
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
 
 
 if __name__ == '__main__':
-    start_time = time.time()
-
-    # define paths
-    path_project = os.path.abspath('..')
-    logger = SummaryWriter('logs')
-
+    # parse args
     args = args_parser()
+    args.device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() and args.gpu != -1 else 'cpu')
+    setup_seed(args.seed)
     exp_details(args)
 
-    if args.gpu:
-        torch.cuda.set_device(args.gpu)
-    device = 'cuda' if args.gpu else 'cpu'
 
-    # load dataset and user groups
-    train_dataset, test_dataset, user_groups = get_dataset(args)
-    print(args.dataset)
+    if args.dataset == 'imagenet':
+        TINY_IMAGENET_ROOT = 'data/tiny-imagenet-200/'
+        if os.path.exists('tiny-imagenet-200.zip') == False:
+            print('\nDownload dataset\n')
+            url = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
+            tiny_imgdataset = wget.download(url, out = os.getcwd())
+            with ZipFile('tiny-imagenet-200.zip', 'r') as zip_ref:
+                zip_ref.extractall('data/')
+        else:
+            print('\nDataset is already downloaded\n')
 
-    # BUILD MODEL
+
+        dataset_train = datasets.ImageFolder(
+            os.path.join('data/', 'tiny-imagenet-200', 'train'),
+            transform=transforms.Compose(
+                [
+                    transforms.Resize(256),
+                    transforms.CenterCrop(224),
+                    transforms.RandomRotation(20),
+                    transforms.RandomHorizontalFlip(0.5),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ]
+            )
+        )
+        dataset_test = TinyImageNetDataset(
+            img_path=os.path.join('data/', 'tiny-imagenet-200', 'val', 'images'), 
+            gt_path=os.path.join('data/', 'tiny-imagenet-200', 'val', 'val_annotations.txt'),
+            class_to_idx=dataset_train.class_to_idx.copy(),
+            transform=transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(224),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ]
+            )
+        )
+        
+        data_dist = []
+        x_client = []
+        if args.iid:
+            print('start separate dataset for iid')
+            dict_users = imagenet_iid(dataset_train, args.num_users)
+            print('end')
+        else:
+            print('start separate dataset for non-iid')
+            dict_users, _ = imagenet_noniid(dataset_train, args.num_users, args.alpha)
+
+            for k, v in dict_users.items():
+                data_dist.append(len(np.array(dataset_train.targets)[v]))
+                x_client.append(f'client{k}')
+            
+            plt.title("data distribution model")
+            plt.bar(x_client, data_dist, color ='maroon', width = 0.3)
+            plt.savefig(f"imgs/data_dist_num_users{args.num_users}_iid_{args.iid}_epochs_{args.epochs}.png") 
+            
+            print('end')
+        
+    else:
+        exit('Error: unrecognized dataset')
+
+
     if args.model == 'mobilenet' and args.dataset == 'imagenet':
-        global_model = MobileNetV2()
+        # net_glob = MobileNetV2().to(args.device)
+        net_glob = models.mobilenet_v3_large(pretrained=True, classes_num=200, input_size=224, width_multiplier=1).to(args.device)
     else:
         exit('Error: unrecognized model')
+    # print(net_glob)
+    net_glob.train()
+    w_glob = net_glob.state_dict()
 
-    # Set the model to train and send it to device.
-    global_model.to(device)
-    global_model.train()
-    print(global_model)
 
-    # copy weights
-    global_weights = global_model.state_dict()
-
-    # Training
-    train_loss, train_accuracy = [], []
-    val_acc_list, net_list = [], []
+    loss_train = []
     cv_loss, cv_acc = [], []
-    print_every = 2
     val_loss_pre, counter = 0, 0
+    net_best = None
+    best_loss = None
+    val_acc_list, net_list = [], []
+    test_best_acc = 0.0
+    
+    test_loss_ar = []
+    test_loss_peer_batch = []
+    tmp = 0
+    test_acc_graph = []
+    train_local_loss = {}
+    
 
-    for epoch in tqdm(range(args.epochs)):
-        local_weights, local_losses = [], []
-        print(f'\n | Global Training Round : {epoch+1} |\n')
-
-        global_model.train()
+    for iter in range(1, args.epochs + 1):
+        print(f'\nGlobal epoch {iter}\n')
+        w_locals, loss_locals = [], []
         m = max(int(args.frac * args.num_users), 1)
         idxs_users = np.random.choice(range(args.num_users), m, replace=False)
-
         for idx in idxs_users:
-            print(f'\nclint {idx} \n')
-            local_model = LocalUpdate(args=args, dataset=train_dataset,
-                                      idxs=user_groups[idx], logger=logger)
-            w, loss = local_model.update_weights(
-                model=copy.deepcopy(global_model), global_round=epoch)
-            local_weights.append(copy.deepcopy(w))
-            local_losses.append(copy.deepcopy(loss))
+            print(f'\nclient {idx}\n')
+            local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_users[idx])
+            w, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+            w_locals.append(w)
+            loss_locals.append(loss)
+            if idx in train_local_loss.keys():
+                train_local_loss[idx].append(loss)
+            else:
+                train_local_loss[idx] = []
+                train_local_loss[idx].append(loss)
 
-        # update global weights
-        global_weights = average_weights(local_weights)
+        w_glob = FedAvg(w_locals)
+        net_glob.load_state_dict(w_glob)
 
-        # update global weights
-        global_model.load_state_dict(global_weights)
-
-        loss_avg = sum(local_losses) / len(local_losses)
-        train_loss.append(loss_avg)
-
-        # Calculate avg training accuracy over all users at every epoch
-        list_acc, list_loss = [], []
-        global_model.eval()
-        for c in range(args.num_users):
-            local_model = LocalUpdate(args=args, dataset=train_dataset,
-                                      idxs=user_groups[idx], logger=logger)
-            acc, loss = local_model.inference(model=global_model)
-            list_acc.append(acc)
-            list_loss.append(loss)
-        train_accuracy.append(sum(list_acc)/len(list_acc))
-
-        # print global training loss after every 'i' rounds
-        if (epoch+1) % print_every == 0:
-            print(f' \nAvg Training Stats after {epoch+1} global rounds:')
-            print(f'Training Loss : {np.mean(np.array(train_loss))}')
-            print('Train Accuracy: {:.2f}% \n'.format(100*train_accuracy[-1]))
-
-    # Test inference after completion of training
-    test_acc, test_loss = test_inference(args, global_model, test_dataset)
-
-    print(f' \n Results after {args.epochs} global rounds of training:')
-    print("|---- Avg Train Accuracy: {:.2f}%".format(100*train_accuracy[-1]))
-    print("|---- Test Accuracy: {:.2f}%".format(100*test_acc))
-
-    # # Saving the objects train_loss and train_accuracy:
-    # file_name = 'save/objects/{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}].pkl'.\
-    #     format(args.dataset, args.model, args.epochs, args.frac, args.iid,
-    #            args.local_ep, args.local_bs)
-
-    # with open(file_name, 'wb') as f:
-    #     pickle.dump([train_loss, train_accuracy], f)
-
-    print('\n Total Run Time: {0:0.4f}'.format(time.time()-start_time))
-
-    # PLOTTING (optional)
-    import matplotlib
-    import matplotlib.pyplot as plt
-    matplotlib.use('Agg')
-
-    # Plot Loss curve
-    plt.figure()
-    plt.title('Training Loss vs Communication rounds')
-    plt.plot(range(len(train_loss)), train_loss, color='r')
-    plt.ylabel('Training loss')
-    plt.xlabel('Communication Rounds')
-    plt.savefig('save/fed_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}]_loss.png'.
-                format(args.dataset, args.model, args.epochs, args.frac,
-                       args.iid, args.local_ep, args.local_bs))
+        loss_avg = sum(loss_locals) / len(loss_locals)
+        print('==============================')
+        print('Round {:3d}, Train loss {:.3f}'.format(iter, loss_avg))
+        loss_train.append(loss_avg)
+        test_acc, test_loss, tmp = test_img(net_glob, dataset_test, args)
+        test_loss_peer_batch.append(tmp)
+        test_loss_ar.append(test_loss)
+        test_acc_graph.append(test_acc)
+        print('==============================')
+        
+        
+    with open('save/model.pkl', 'wb') as fin:
+        pickle.dump(net_glob)
     
-    # Plot Average Accuracy vs Communication rounds
+    
+    net_glob.eval()
+    acc_train, loss_train = test_img(net_glob, dataset_train, args)
+    acc_test, loss_test = test_img(net_glob, dataset_test, args)
+    print("Training accuracy: {:.2f}".format(acc_train))
+    print("Testing accuracy: {:.2f}".format(acc_test))
+    
+
+    plt.title("global model")
+    plt.plot(range(1, len(loss_train)+1, 1), loss_train, label='train loss')
+    plt.plot(range(1, len(loss_train)+1, 1), test_loss_ar, label='test loss')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend(fontsize=12)
+    plt.savefig("imgs/global model {}_{}_{}_C_{}_iid_{}.png".format(args.dataset, args.model, args.epochs, args.frac, args.iid))
+    plt.close()
+    
+    
+    k = 0
+    print(train_local_loss)
+    for i in train_local_loss.keys():
+        plt.plot(range(1, len(train_local_loss[i]) + 1, 1), train_local_loss[i], label=f'client{i}')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend()
+    plt.savefig("imgs/Train loss by each client {}_{}_{}_C{}_iid{}.png".format(args.dataset, args.model, args.epochs, args.frac, args.iid))
+    plt.close()
+    
+    
     plt.figure()
-    plt.title('Average Accuracy vs Communication rounds')
-    plt.plot(range(len(train_accuracy)), train_accuracy, color='k')
-    plt.ylabel('Average Accuracy')
-    plt.xlabel('Communication Rounds')
-    plt.savefig('save/fed_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}]_acc.png'.
-                format(args.dataset, args.model, args.epochs, args.frac,
-                       args.iid, args.local_ep, args.local_bs))
+    plt.plot(range(len(loss_train)), loss_train)
+    plt.ylabel('train_loss')
+    plt.savefig('imgs/fed_numUsers_{}_{}_{}_{}_C{}_iid{}.png'.format(args.num_users, args.dataset, args.model, args.epochs, args.frac, args.iid))
+
+
+
