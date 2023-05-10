@@ -33,28 +33,28 @@ def imagenet_noniid(dataset, no_participants, alpha=0.9):
     """
     np.random.seed(666)
     random.seed(666)
-    cifar_classes = {}
+    iamgenet_classes = {}
     for ind, x in enumerate(dataset):
         _, label = x
-        if label in cifar_classes:
-            cifar_classes[label].append(ind)
+        if label in iamgenet_classes:
+            iamgenet_classes[label].append(ind)
         else:
-            cifar_classes[label] = [ind]
+            iamgenet_classes[label] = [ind]
 
     per_participant_list = defaultdict(list)
-    no_classes = len(cifar_classes.keys())
-    class_size = len(cifar_classes[0])
+    no_classes = len(iamgenet_classes.keys())
+    class_size = len(iamgenet_classes[0])
     datasize = {}
     for n in range(no_classes):
-        random.shuffle(cifar_classes[n])
+        random.shuffle(iamgenet_classes[n])
         sampled_probabilities = class_size * np.random.dirichlet(
             np.array(no_participants * [alpha]))
         for user in range(no_participants):
             no_imgs = int(round(sampled_probabilities[user]))
             datasize[user, n] = no_imgs
-            sampled_list = cifar_classes[n][:min(len(cifar_classes[n]), no_imgs)]
+            sampled_list = iamgenet_classes[n][:min(len(iamgenet_classes[n]), no_imgs)]
             per_participant_list[user].extend(sampled_list)
-            cifar_classes[n] = cifar_classes[n][min(len(cifar_classes[n]), no_imgs):]
+            iamgenet_classes[n] = iamgenet_classes[n][min(len(iamgenet_classes[n]), no_imgs):]
     train_img_size = np.zeros(no_participants)
     for i in range(no_participants):
         train_img_size[i] = sum([datasize[i,j] for j in range(200)])

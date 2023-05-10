@@ -10,28 +10,26 @@ def setup_seed(seed):
     random.seed(seed+12345)
     torch.backends.cudnn.deterministic = True
 
-def average_weights(w):
+def FedAvg(w):
     w_avg = copy.deepcopy(w[0])
-    for key in w_avg.keys():
+    for k in w_avg.keys():
         for i in range(1, len(w)):
-            w_avg[key] += w[i][key]
-        w_avg[key] = torch.div(w_avg[key], len(w))
+            w_avg[k] += w[i][k]
+        w_avg[k] = torch.div(w_avg[k], len(w))
     return w_avg
 
-
 def exp_details(args):
-    print('\nExperimental details:')
-    print(f'    Model     : {args.model}')
-    print(f'    Optimizer : {args.optimizer}')
-    print(f'    Learning  : {args.lr}')
-    print(f'    Global Rounds   : {args.epochs}\n')
+    print('\n---------------Experimental details:-------------\n')
+    print(f'\tModel           : {args.model}')
+    print(f'\ttLearning       : {args.lr}')
+    print(f'\tGlobal Rounds   : {args.epochs}\n')
 
-    print('    Federated parameters:')
+    print('\n----------------Federated parameters:------------\n')
     if args.iid:
-        print('    IID')
+        print('\tIID')
     else:
-        print('    Non-IID')
-    print(f'    Fraction of users  : {args.frac}')
-    print(f'    Local Batch size   : {args.local_bs}')
-    print(f'    Local Epochs       : {args.local_ep}\n')
+        print('\tNon-IID')
+    print(f'\tFraction of users  : {args.frac}')
+    print(f'\tLocal Batch size   : {args.local_bs}')
+    print(f'\tLocal Epochs       : {args.local_ep}\n')
     return
