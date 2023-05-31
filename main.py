@@ -41,11 +41,13 @@ if __name__ == '__main__':
             with ZipFile('tiny-imagenet-200.zip', 'r') as zip_ref:
                 zip_ref.extractall('data/')
             print('\n\tThe archive is unpacked\n')
-        else:
+        elif os.path.isfile('data/tiny-imagenet-200') == False:
             print('\n\tExtract data from zip\n')
             with ZipFile('tiny-imagenet-200.zip', 'r') as zip_ref:
                 zip_ref.extractall('data/')
             print('\n\tThe archive is unpacked\n')
+        else:
+            print('\ndataset already download\n')
 
 
         dataset_train = datasets.ImageFolder(
