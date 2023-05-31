@@ -1,7 +1,9 @@
-import copy
-import torch
+import torch.backends.cudnn
+import torch.cuda
 import numpy as np
 import random
+import torch.nn as nn
+
 
 def setup_seed(seed):
     torch.manual_seed(seed+1)
@@ -10,26 +12,30 @@ def setup_seed(seed):
     random.seed(seed+12345)
     torch.backends.cudnn.deterministic = True
 
-def FedAvg(w):
-    w_avg = copy.deepcopy(w[0])
-    for k in w_avg.keys():
-        for i in range(1, len(w)):
-            w_avg[k] += w[i][k]
-        w_avg[k] = torch.div(w_avg[k], len(w))
-    return w_avg
+
+def add_scalar(writer, user_num, test_result, epoch):
+    test_loss, test_acc, user_loss, user_acc = test_result
+    writer.add_scalar(f'user_{user_num}/global/test_loss', test_loss, epoch)
+    writer.add_scalar(f'user_{user_num}/global/test_acc', test_acc, epoch)
+    writer.add_scalar(f'user_{user_num}/local/test_loss', user_loss, epoch)
+    writer.add_scalar(f'user_{user_num}/local/test_acc', user_acc, epoch)
+
 
 def exp_details(args):
-    print('\n---------------Experimental details:-------------\n')
-    print(f'\tModel           : {args.model}')
-    print(f'\ttLearning       : {args.lr}')
-    print(f'\tGlobal Rounds   : {args.epochs}\n')
-
-    print('\n----------------Federated parameters:------------\n')
+    print('*******************************************************************')
+    print('***                   Experimental details:                     ***')
+    print('*******************************************************************')
+    print(f'***\t\tepochs\t\t\t:\t{args.epochs}\t\t***')
+    print(f'***\t\tModel\t\t\t:\t{args.model}\t***')
+    print(f'***\t\tLearning rate\t\t:\t{args.lr}\t\t***')
+    print(f'***\t\tGlobal Rounds\t\t:\t{args.epochs}\t\t***')
+    print(f"***\t\tDevice\t\t\t:\t{'gpu' if torch.cuda.is_available() and args.gpu != -1 else 'cpu'}\t\t***")
     if args.iid:
-        print('\tIID')
+        print('***\t\tData split\t\t:\tIID\t\t***')
     else:
-        print('\tNon-IID')
-    print(f'\tFraction of users  : {args.frac}')
-    print(f'\tLocal Batch size   : {args.local_bs}')
-    print(f'\tLocal Epochs       : {args.local_ep}\n')
+        print('***\t\tData split\t\t:\tNon-IID\t\t***')
+    print(f'***\t\tFraction of users\t:\t{args.frac}\t\t***')
+    print(f'***\t\tLocal Batch size\t:\t{args.local_bs}\t\t***')
+    print(f'***\t\tLocal Epochs\t\t:\t{args.local_ep}\t\t***')
+    print('*******************************************************************')
     return

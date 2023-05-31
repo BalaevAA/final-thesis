@@ -1,5 +1,6 @@
 import os
 import os.path
+from tqdm import tqdm
 import wget
 from zipfile import ZipFile
 import copy
@@ -7,19 +8,18 @@ import numpy as np
 from torchvision import datasets, transforms
 import torch
 import pickle
-from data_utils.sampling import imagenet_iid, imagenet_noniid
+from data_utils.sampling import imagenet_iid, imagenet_noniid, cifar_iid, cifar_noniid
 from config.options import args_parser
-from model.update import LocalUpdate
-from model.models import MobileNetV2
-from utils.util import FedAvg
-from model.test import test_img
+from models.Update import LocalUpdate
+from models.Nets import MobileNetV2, vgg16,MobileNetV3
+from utils.Fed import FedAvg
+from models.Test import test_img
 from utils.util import setup_seed, exp_details
-from data_utils.data_reader import TinyImageNetDataset
+from data_utils.dataset_reader import TinyImageNetDataset
+from datetime import datetime
 import torchvision.models as models
+import torch.nn as nn
 import matplotlib.pyplot as plt
-import seaborn as sns
-
-
 
 
 if __name__ == '__main__':
@@ -29,7 +29,8 @@ if __name__ == '__main__':
     setup_seed(args.seed)
     exp_details(args)
 
-
+    data_dist = []
+    x_client = []
     if args.dataset == 'imagenet':
         TINY_IMAGENET_ROOT = 'data/tiny-imagenet-200/'
         if os.path.exists('tiny-imagenet-200.zip') == False:
@@ -68,41 +69,102 @@ if __name__ == '__main__':
                 ]
             )
         )
-        
-        data_dist = []
-        x_client = []
         if args.iid:
             print('start separate dataset for iid')
             dict_users = imagenet_iid(dataset_train, args.num_users)
+            x_client = [f'client{i}' for i in dict_users.keys()]
+            data_dist = [len(dict_users[i]) for i in dict_users.keys()]
             print('end')
         else:
             print('start separate dataset for non-iid')
             dict_users, _ = imagenet_noniid(dataset_train, args.num_users, args.alpha)
-
             for k, v in dict_users.items():
                 data_dist.append(len(np.array(dataset_train.targets)[v]))
                 x_client.append(f'client{k}')
-            
-            plt.title("data distribution model")
-            plt.bar(x_client, data_dist, color ='maroon', width = 0.3)
-            plt.savefig(f"imgs/data_dist_num_users{args.num_users}_iid_{args.iid}_epochs_{args.epochs}.png") 
-            
             print('end')
+    
+    elif args.dataset == 'cifar':
+        dataset_train = datasets.CIFAR10(
+            'data/cifar', 
+            train=True, 
+            download=True, 
+            transform=transforms.Compose(
+                [
+                    transforms.RandomCrop(32, padding=4),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(), 
+                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                ]
+            )
+        )
+        dataset_test = datasets.CIFAR10(
+            'data/cifar', 
+            train=False, 
+            download=True, 
+            transform=transforms.Compose(
+                [
+                    transforms.ToTensor(), 
+                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                ]
+            )
+        )
+        if args.iid:
+            print('start separate dataset for iid')
+            dict_users = cifar_iid(dataset_train, args.num_users)
+            x_client = [f'client{i}' for i in dict_users.keys()]
+            data_dist = [len(dict_users[i]) for i in dict_users.keys()]
+            print('end')
+        else:
+            print('start separate dataset for non-iid')
+            dict_users, _ = cifar_noniid(dataset_train, args.num_users, args.alpha)
+            for k, v in dict_users.items():
+                data_dist.append(len(np.array(dataset_train.targets)[v]))
+                x_client.append(f'client{k}')
+            print('end')
+    
+
+    if args.iid:
+        print('start separate dataset for iid')
+        dict_users = imagenet_iid(dataset_train, args.num_users)
+        x_client = [f'client{i}' for i in dict_users.keys()]
+        data_dist = [len(dict_users[i]) for i in dict_users.keys()]
+        print('end')
+    else:
+        print('start separate dataset for non-iid')
+        dict_users, _ = imagenet_noniid(dataset_train, args.num_users, args.alpha)
+        for k, v in dict_users.items():
+            data_dist.append(len(np.array(dataset_train.targets)[v]))
+            x_client.append(f'client{k}')
+        print('end')
+    
+    
+    plt.title("data distribution")
+    plt.bar(x_client, data_dist, color ='maroon', width = 0.3)
+    plt.savefig(f"imgs/data_dist_num_users{args.num_users}_iid_{args.iid}_epochs_{args.epochs}.png") 
+    plt.close()  
         
-    else:
-        exit('Error: unrecognized dataset')
+        
+    if args.dataset == 'imagenet':
+        if args.model == 'mobilenetV3-small-pre':
+            net_glob = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.IMAGENET1K_V1).to(args.device)
+        elif args.model == 'mobilenetV3-large-pre':
+            net_glob = models.mobilenet_v3_large(weights=models.MobileNet_V3_Large_Weights.IMAGENET1K_V2).to(args.device)
+        elif args.model == 'mobilenetV3-small':
+            net_glob = MobileNetV3(mode='small', classes_num=args.num_classes, input_size=56, 
+                    width_multiplier=1, dropout=0.2, 
+                    BN_momentum=0.1, zero_gamma=False)
+    elif args.dataset == 'cifar':
+        if args.model == 'vgg16':
+            net_glob = vgg16().to(args.device)
 
 
-    if args.model == 'mobilenet' and args.dataset == 'imagenet':
-        # net_glob = MobileNetV2().to(args.device)
-        net_glob = models.mobilenet_v3_large(pretrained=True, classes_num=200, input_size=224, width_multiplier=1).to(args.device)
-    else:
-        exit('Error: unrecognized model')
     # print(net_glob)
     net_glob.train()
+
+    # copy weights
     w_glob = net_glob.state_dict()
 
-
+    # training
     loss_train = []
     cv_loss, cv_acc = [], []
     val_loss_pre, counter = 0, 0
@@ -118,7 +180,7 @@ if __name__ == '__main__':
     train_local_loss = {}
     
 
-    for iter in range(1, args.epochs + 1):
+    for iter in tqdm(range(1, args.epochs + 1)):
         print(f'\nGlobal epoch {iter}\n')
         w_locals, loss_locals = [], []
         m = max(int(args.frac * args.num_users), 1)
@@ -134,10 +196,16 @@ if __name__ == '__main__':
             else:
                 train_local_loss[idx] = []
                 train_local_loss[idx].append(loss)
-
+            # writer.add_scalar('train loss', {f'client_{idx}': loss, iter)
+        # update global weights
         w_glob = FedAvg(w_locals)
-        net_glob.load_state_dict(w_glob)
 
+        # copy weight to net_glob
+        net_glob.load_state_dict(w_glob)
+        with open(f'save/model_lust{iter}.pkl', 'wb') as fin:
+            pickle.dump(net_glob, fin)
+
+        # print loss
         loss_avg = sum(loss_locals) / len(loss_locals)
         print('==============================')
         print('Round {:3d}, Train loss {:.3f}'.format(iter, loss_avg))
@@ -147,22 +215,16 @@ if __name__ == '__main__':
         test_loss_ar.append(test_loss)
         test_acc_graph.append(test_acc)
         print('==============================')
+        save_info = {
+            "model": net_glob.state_dict(),
+            "epoch": iter
+        }
         
         
-    with open('save/model.pkl', 'wb') as fin:
-        pickle.dump(net_glob)
     
-    
-    net_glob.eval()
-    acc_train, loss_train = test_img(net_glob, dataset_train, args)
-    acc_test, loss_test = test_img(net_glob, dataset_test, args)
-    print("Training accuracy: {:.2f}".format(acc_train))
-    print("Testing accuracy: {:.2f}".format(acc_test))
-    
-
     plt.title("global model")
-    plt.plot(range(1, len(loss_train)+1, 1), loss_train, label='train loss')
-    plt.plot(range(1, len(loss_train)+1, 1), test_loss_ar, label='test loss')
+    plt.plot(range(len(loss_train)), loss_train, label='train loss')
+    plt.plot(range(len(loss_train)), test_loss_ar, label='test loss')
     plt.xlabel('epoch')
     plt.ylabel('loss')
     plt.legend(fontsize=12)
@@ -173,7 +235,7 @@ if __name__ == '__main__':
     k = 0
     print(train_local_loss)
     for i in train_local_loss.keys():
-        plt.plot(range(1, len(train_local_loss[i]) + 1, 1), train_local_loss[i], label=f'client{i}')
+        plt.plot(range(len(train_local_loss[i])), train_local_loss[i], label=f'client{i}')
     plt.xlabel('epoch')
     plt.ylabel('loss')
     plt.legend()
@@ -185,6 +247,22 @@ if __name__ == '__main__':
     plt.plot(range(len(loss_train)), loss_train)
     plt.ylabel('train_loss')
     plt.savefig('imgs/fed_numUsers_{}_{}_{}_{}_C{}_iid{}.png'.format(args.num_users, args.dataset, args.model, args.epochs, args.frac, args.iid))
+    plt.close()
+    
+    plt.title('Test accuracy')
+    plt.plot(range(len(test_acc_graph)),test_acc_graph)
+    plt.xlabel('epoch')
+    plt.ylabel('accuracy')
+    plt.savefig("img/Test accuracy{}_{}_{}_C{}_iid{}.png".format(args.dataset, args.model, args.epochs, args.frac, args.iid))
+    plt.close()
+
+    # testing
+    net_glob.eval()
+    acc_train, loss_train = test_img(net_glob, dataset_train, args)
+    acc_test, loss_test = test_img(net_glob, dataset_test, args)
+    print("Training accuracy: {:.2f}".format(acc_train))
+    print("Testing accuracy: {:.2f}".format(acc_test))
 
 
-
+    with open('save/model_lust.pkl', 'wb') as fin:
+        pickle.dump(net_glob, fin)
