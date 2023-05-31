@@ -37,10 +37,15 @@ if __name__ == '__main__':
             print('\nDownload dataset\n')
             url = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
             tiny_imgdataset = wget.download(url, out = os.getcwd())
+            print('\n\tExtract data from zip\n')
             with ZipFile('tiny-imagenet-200.zip', 'r') as zip_ref:
                 zip_ref.extractall('data/')
+            print('\n\tThe archive is unpacked\n')
         else:
-            print('\nDataset is already downloaded\n')
+            print('\n\tExtract data from zip\n')
+            with ZipFile('tiny-imagenet-200.zip', 'r') as zip_ref:
+                zip_ref.extractall('data/')
+            print('\n\tThe archive is unpacked\n')
 
 
         dataset_train = datasets.ImageFolder(
