@@ -5,6 +5,27 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 
+def test(args, net_g, data_loader):
+    # testing
+    net_g.eval()
+    test_loss = []
+    correct = 0
+    with torch.no_grad():
+        for idx, (data, target) in enumerate(data_loader):
+            data, target = data.to(args.device), target.to(args.device)
+            log_probs = net_g(data)
+            test_loss.append(nn.CrossEntropyLoss()(log_probs, target).item())
+            y_pred = log_probs.data.max(1, keepdim=True)[1]
+            correct += y_pred.eq(target.data.view_as(y_pred)).long().cpu().sum().item()
+
+        loss_avg = sum(test_loss)/len(test_loss)
+        test_acc = 100. * correct / len(data_loader.dataset)
+    print('\nTest set: Average loss: {:.4f} \nAccuracy: {}/{} ({:.2f}%)\n'.format(
+        loss_avg, correct, len(data_loader.dataset), test_acc))
+
+    return test_acc, loss_avg
+
+
 def test_img(net_g, datatest, args):
     net_g.eval()
     # testing
