@@ -84,13 +84,15 @@ def make_layers(cfg, batch_norm=False):
     return nn.Sequential(*layers)
 
 
-cfg = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M']
-
+cfg16 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M']
+cfg19 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M']
 
 
 def vgg16():
-    """VGG 16-layer model (configuration "D")"""
-    return VGG(make_layers(cfg['D']))
+    return VGG(make_layers(cfg16))
+
+def vgg19():
+    return VGG(make_layers(cfg19))
 
 
 
@@ -177,11 +179,6 @@ class MobileNetV2(nn.Module):
 ###                          ###
 ################################
 def _ensure_divisible(number, divisor, min_value=None):
-    '''
-    Ensure that 'number' can be 'divisor' divisible
-    Reference from original tensorflow repo:
-    https://github.com/tensorflow/models/blob/master/research/slim/nets/mobilenet/mobilenet.py
-    '''
     if min_value is None:
         min_value = divisor
     new_num = max(min_value, int(number + divisor / 2) // divisor * divisor)
@@ -212,10 +209,7 @@ class H_swish(nn.Module):
         return x * F.relu6(x + 3, inplace=self.inplace) / 6
 
 class SEModule(nn.Module):
-    '''
-    SE Module
-    Ref: https://github.com/moskomule/senet.pytorch/blob/master/senet/se_module.py
-    '''
+
     def __init__(self, in_channels_num, reduction_ratio=4):
         super(SEModule, self).__init__()
 

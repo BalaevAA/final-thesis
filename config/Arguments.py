@@ -6,22 +6,18 @@ class Arguments:
         self.local_ep = 5
         self.local_bs = 32
         self.test_bs = 32
-        self.lr = 0.001
+        self.lr = 0.01
         self.momentum = 0.9
-        self.split = 'user'
+        self.optimizer = 'user'
         
-        self.model = 'mobilenet'
+        self.model = 'vgg19'
         
-        self.rebuild = 1
-        self.struct = 1
         self.dataset = 'imagenet'
-        self.iid = True
+        self.data_dist = 'noniid1'
         self.alpha = 0.8
-        self.num_classes = 200
+        self.num_classes = 10
         self.num_channels = 3
         self.gpu = 0
-        self.stopping_rounds = 10
         self.verbose = 1
-        self.debug = 1
         self.seed = 1
         
